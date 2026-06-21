@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Redrob AI — Smart Candidate Ranker</title>
+  <meta name="description" content="Multi-dimensional AI candidate ranking system for Senior AI Engineer at Redrob. Honeypot-safe, explainable, sub-5-min for 100K candidates." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0d0f1a;
+      --surface:  #131726;
+      --border:   #1e2a3a;
+      --primary:  #8b5cf6;
+      --cyan:     #06b6d4;
+      --green:    #10b981;
+      --amber:    #f59e0b;
+      --red:      #ef4444;
+      --text:     #e2e8f0;
+      --muted:    #64748b;
+      --subtle:   #94a3b8;
+    }
+
+    html, body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* ── Layout ── */
+    .wrapper { display: grid; grid-template-columns: 280px 1fr; min-height: 100vh; }
+
+    /* ── Sidebar ── */
+    aside {
+      background: #0a0c15; border-right: 1px solid var(--border);
+      padding: 1.5rem 1.2rem; position: sticky; top: 0; height: 100vh;
+      overflow-y: auto; display: flex; flex-direction: column; gap: 1.2rem;
+    }
+    .sidebar-logo { display: flex; align-items: center; gap: 0.6rem; font-weight: 800; font-size: 1.1rem; color: #fff; }
+    .sidebar-logo span { background: linear-gradient(135deg, var(--primary), var(--cyan)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    aside hr { border: none; border-top: 1px solid var(--border); }
+    .sidebar-section h4 { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 0.75rem; }
+
+    /* Upload zone */
+    .upload-zone {
+      border: 2px dashed var(--border); border-radius: 12px; padding: 1.2rem;
+      text-align: center; cursor: pointer; transition: all 0.2s;
+      background: rgba(139,92,246,0.03);
+    }
+    .upload-zone:hover, .upload-zone.drag { border-color: var(--primary); background: rgba(139,92,246,0.08); }
+    .upload-zone .icon { font-size: 1.8rem; margin-bottom: 0.4rem; }
+    .upload-zone p { font-size: 0.8rem; color: var(--subtle); }
+    .upload-zone strong { color: var(--text); font-size: 0.85rem; }
+    #fileInput { display: none; }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex; align-items: center; gap: 0.5rem; justify-content: center;
+      padding: 0.6rem 1.2rem; border-radius: 8px; font-size: 0.85rem; font-weight: 600;
+      cursor: pointer; border: none; transition: all 0.2s; width: 100%;
+    }
+    .btn-primary { background: linear-gradient(135deg, var(--primary), #6d28d9); color: #fff; }
+    .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+    .btn-secondary { background: var(--border); color: var(--subtle); }
+    .btn-secondary:hover { background: #2a3a4a; color: var(--text); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+    /* Weight sliders */
+    .weight-row { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.6rem; }
+    .weight-row label { font-size: 0.75rem; color: var(--subtle); flex: 1; }
+    .weight-row .pct { font-size: 0.75rem; color: var(--primary); font-weight: 600; min-width: 2.5rem; text-align: right; }
+    input[type=range] { flex: 2; accent-color: var(--primary); cursor: pointer; }
+    .weight-total { font-size: 0.72rem; color: var(--muted); text-align: center; padding: 0.3rem; }
+
+    /* JD context */
+    .jd-pill { display: inline-block; background: rgba(139,92,246,0.1); border: 1px solid rgba(139,92,246,0.3); color: #c4b5fd; border-radius: 20px; padding: 0.15rem 0.6rem; font-size: 0.72rem; margin: 0.15rem; }
+    .sidebar-kv { font-size: 0.8rem; color: var(--subtle); margin-bottom: 0.3rem; }
+    .sidebar-kv strong { color: var(--text); }
+    .disq-item { font-size: 0.75rem; color: var(--muted); padding: 0.15rem 0; }
+    .disq-item::before { content: "✗ "; color: var(--red); }
+
+    /* ── Main ── */
+    main { padding: 2rem; overflow-y: auto; }
+
+    /* Hero */
+    .hero {
+      background: linear-gradient(135deg, #1a1040 0%, #0f2444 60%, #0a1628 100%);
+      border: 1px solid rgba(139,92,246,0.3); border-radius: 16px;
+      padding: 2rem 2.5rem; margin-bottom: 1.5rem; position: relative; overflow: hidden;
+    }
+    .hero::before {
+      content: ''; position: absolute; top: -50%; left: -20%; width: 60%; height: 200%;
+      background: radial-gradient(ellipse, rgba(139,92,246,0.12) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero-badges { display: flex; gap: 0.5rem; margin-bottom: 0.8rem; flex-wrap: wrap; }
+    .badge { display: inline-block; background: rgba(139,92,246,0.15); border: 1px solid rgba(139,92,246,0.4); color: #c4b5fd; border-radius: 20px; padding: 0.2rem 0.75rem; font-size: 0.75rem; }
+    .hero h1 { font-size: 1.9rem; font-weight: 800; color: #fff; margin-bottom: 0.4rem; }
+    .hero p { color: var(--subtle); font-size: 0.9rem; }
+
+    /* Metric cards */
+    .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
+    .metric-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1.2rem 1.4rem; }
+    .metric-val { font-size: 2rem; font-weight: 700; background: linear-gradient(135deg, var(--primary), var(--cyan)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .metric-lbl { color: var(--muted); font-size: 0.78rem; margin-top: 0.3rem; }
+
+    /* Toolbar */
+    .toolbar { display: flex; gap: 1rem; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; }
+    .toolbar-left { display: flex; gap: 0.75rem; flex: 1; }
+    .show-select { background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 0.5rem 1rem; font-size: 0.85rem; cursor: pointer; }
+
+    /* Spinner */
+    .spinner-wrap { display: none; align-items: center; gap: 0.75rem; padding: 2rem; justify-content: center; }
+    .spinner-wrap.show { display: flex; }
+    .spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Candidate card */
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 0.75rem; overflow: hidden; transition: border-color 0.2s; }
+    .card:hover { border-color: rgba(139,92,246,0.35); }
+    .card-header { display: flex; align-items: center; gap: 0.9rem; padding: 1rem 1.2rem; cursor: pointer; user-select: none; }
+    .rank-badge { display: flex; align-items: center; justify-content: center; width: 2.2rem; height: 2.2rem; border-radius: 50%; font-weight: 700; font-size: 0.82rem; flex-shrink: 0; }
+    .r1 { background: linear-gradient(135deg,#f59e0b,#d97706); color:#fff; }
+    .r2 { background: linear-gradient(135deg,#94a3b8,#64748b); color:#fff; }
+    .r3 { background: linear-gradient(135deg,#cd7c40,#a16207); color:#fff; }
+    .r10 { background: linear-gradient(135deg,var(--primary),#6d28d9); color:#fff; }
+    .rn { background: var(--border); color: var(--muted); }
+    .card-title { flex: 1; }
+    .card-title .ct { font-weight: 600; font-size: 0.92rem; }
+    .card-title .cs { color: var(--muted); font-size: 0.78rem; }
+    .card-score { font-weight: 700; font-size: 1.1rem; }
+    .score-high  { color: var(--green); }
+    .score-mid   { color: var(--amber); }
+    .score-low   { color: #f97316; }
+    .score-dead  { color: var(--muted); }
+    .chevron { color: var(--muted); transition: transform 0.2s; font-size: 0.85rem; }
+    .chevron.open { transform: rotate(180deg); }
+
+    /* Card body */
+    .card-body { display: none; padding: 0 1.2rem 1.2rem; border-top: 1px solid var(--border); }
+    .card-body.open { display: grid; grid-template-columns: 1fr 260px; gap: 1.5rem; padding-top: 1rem; }
+    .card-meta { font-size: 0.82rem; color: var(--subtle); margin-bottom: 0.75rem; }
+    .card-meta strong { color: var(--text); }
+
+    /* Pills */
+    .pills { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.8rem; }
+    .pill { display: inline-flex; align-items: center; gap: 0.3rem; border-radius: 20px; padding: 0.18rem 0.65rem; font-size: 0.72rem; border: 1px solid; }
+    .pill-g { background: rgba(16,185,129,0.1); border-color: rgba(16,185,129,0.35); color: #34d399; }
+    .pill-r { background: rgba(239,68,68,0.1);  border-color: rgba(239,68,68,0.35);  color: #fca5a5; }
+    .pill-b { background: rgba(6,182,212,0.1);  border-color: rgba(6,182,212,0.35);  color: #67e8f9; }
+    .pill-p { background: rgba(139,92,246,0.1); border-color: rgba(139,92,246,0.35); color: #c4b5fd; }
+    .pill-a { background: rgba(245,158,11,0.1); border-color: rgba(245,158,11,0.35); color: #fcd34d; }
+
+    /* Skills */
+    .section-label { font-size: 0.75rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.4rem; }
+
+    /* Reasoning */
+    .reasoning { background: rgba(139,92,246,0.06); border-left: 3px solid rgba(139,92,246,0.4); border-radius: 0 8px 8px 0; padding: 0.7rem 1rem; font-size: 0.82rem; color: var(--subtle); line-height: 1.6; margin-bottom: 0.8rem; }
+
+    /* Score bars */
+    .bar-row { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.4rem; }
+    .bar-lbl { font-size: 0.72rem; color: var(--muted); width: 130px; flex-shrink: 0; }
+    .bar-track { flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+    .bar-val { font-size: 0.72rem; color: var(--subtle); width: 30px; text-align: right; flex-shrink: 0; }
+
+    /* Radar SVG */
+    .radar-wrap { display: flex; flex-direction: column; gap: 1rem; }
+    .radar-svg { width: 100%; max-width: 240px; margin: 0 auto; display: block; }
+
+    /* Career history */
+    .career-item { display: flex; gap: 0.6rem; margin-bottom: 0.5rem; align-items: flex-start; }
+    .career-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
+    .career-dot.current { background: var(--green); }
+    .career-dot.past { background: var(--border); }
+    .career-text { font-size: 0.78rem; }
+    .career-text strong { color: var(--text); } .career-text .co { color: var(--muted); }
+
+    /* Status bar */
+    .status { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 0.8rem 1.2rem; margin-bottom: 1rem; font-size: 0.83rem; color: var(--subtle); display: flex; align-items: center; gap: 0.6rem; }
+    .status.success { border-color: rgba(16,185,129,0.3); background: rgba(16,185,129,0.05); color: #34d399; }
+    .status.error { border-color: rgba(239,68,68,0.3); background: rgba(239,68,68,0.05); color: #fca5a5; }
+
+    /* Empty state */
+    .empty { text-align: center; padding: 4rem 2rem; color: var(--muted); }
+    .empty .big { font-size: 3rem; margin-bottom: 1rem; }
+    .empty p { font-size: 0.9rem; }
+
+    /* Footer */
+    footer { text-align: center; padding: 1.5rem; color: var(--border); font-size: 0.75rem; margin-top: 2rem; }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .wrapper { grid-template-columns: 1fr; }
+      aside { position: static; height: auto; }
+      .card-body.open { grid-template-columns: 1fr; }
+      .metrics { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+<div class="wrapper">
+
+  <!-- ─── SIDEBAR ─────────────────────────────────────────── -->
+  <aside>
+    <div class="sidebar-logo">🤖 <span>Redrob AI</span> Ranker</div>
+    <hr />
+
+    <!-- Upload -->
+    <div class="sidebar-section">
+      <h4>Data Source</h4>
+      <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+        <div class="icon">📂</div>
+        <strong id="uploadLabel">Click or drag JSON here</strong>
+        <p>Array of candidates · max 100</p>
+      </div>
+      <input type="file" id="fileInput" accept=".json" />
+      <br/>
+      <button class="btn btn-secondary" id="loadSampleBtn" onclick="loadSample()" style="margin-top:0.4rem">
+        ⚡ Load sample_candidates.json
+      </button>
+      <button class="btn btn-primary" id="rankBtn" onclick="runRanking()" disabled style="margin-top:0.5rem">
+        🚀 Run Ranking
+      </button>
+    </div>
+
+    <hr />
+
+    <!-- Weight sliders -->
+    <div class="sidebar-section">
+      <h4>Weight Overrides <span style="font-weight:400;text-transform:none;color:var(--muted)">(auto-normalised)</span></h4>
+      <div id="sliders">
+        <div class="weight-row">
+          <label>AI Skills</label>
+          <input type="range" min="0" max="100" value="30" id="w_skills" oninput="updateWeights()" />
+          <span class="pct" id="pct_skills">30%</span>
+        </div>
+        <div class="weight-row">
+          <label>Career Quality</label>
+          <input type="range" min="0" max="100" value="25" id="w_career" oninput="updateWeights()" />
+          <span class="pct" id="pct_career">25%</span>
+        </div>
+        <div class="weight-row">
+          <label>Experience Fit</label>
+          <input type="range" min="0" max="100" value="20" id="w_exp" oninput="updateWeights()" />
+          <span class="pct" id="pct_exp">20%</span>
+        </div>
+        <div class="weight-row">
+          <label>Availability</label>
+          <input type="range" min="0" max="100" value="15" id="w_avail" oninput="updateWeights()" />
+          <span class="pct" id="pct_avail">15%</span>
+        </div>
+        <div class="weight-row">
+          <label>Platform</label>
+          <input type="range" min="0" max="100" value="10" id="w_plat" oninput="updateWeights()" />
+          <span class="pct" id="pct_plat">10%</span>
+        </div>
+      </div>
+    </div>
+
+    <hr />
+
+    <!-- JD Context -->
+    <div class="sidebar-section">
+      <h4>JD Context</h4>
+      <div class="sidebar-kv"><strong>Role:</strong> Senior AI Engineer</div>
+      <div class="sidebar-kv"><strong>Company:</strong> Redrob AI</div>
+      <div class="sidebar-kv"><strong>Exp:</strong> 5–9 years</div>
+      <div class="sidebar-kv"><strong>Location:</strong> Pune / Noida</div>
+      <br/>
+      <div style="font-size:0.75rem;color:var(--muted);margin-bottom:0.4rem">Must-haves:</div>
+      <div><span class="jd-pill">Vector retrieval</span><span class="jd-pill">Hybrid search</span><span class="jd-pill">Ranking eval</span><span class="jd-pill">Python</span><span class="jd-pill">RAG</span></div>
+      <br/>
+      <div style="font-size:0.75rem;color:var(--muted);margin-bottom:0.3rem">Disqualifiers:</div>
+      <div class="disq-item">All-consulting career</div>
+      <div class="disq-item">Non-AI titles throughout</div>
+      <div class="disq-item">Ghost candidates (6mo inactive)</div>
+      <div class="disq-item">Honeypot profiles</div>
+    </div>
+  </aside>
+
+  <!-- ─── MAIN ─────────────────────────────────────────────── -->
+  <main>
+
+    <!-- Hero -->
+    <div class="hero">
+      <div class="hero-badges">
+        <span class="badge">🔬 AI-Powered</span>
+        <span class="badge">⚡ Sub-5-min</span>
+        <span class="badge">🛡️ Honeypot-Safe</span>
+        <span class="badge">🐍 Python Backend</span>
+      </div>
+      <h1>Redrob Smart Candidate Ranker</h1>
+      <p>Multi-dimensional scoring · 23 behavioral signals · Explainable rankings · CPU-only · No API calls</p>
+    </div>
+
+    <!-- Metrics -->
+    <div class="metrics">
+      <div class="metric-card"><div class="metric-val" id="m-total">—</div><div class="metric-lbl">Candidates Ranked</div></div>
+      <div class="metric-card"><div class="metric-val" id="m-fit">—</div><div class="metric-lbl">Strong Fit (≥0.70)</div></div>
+      <div class="metric-card"><div class="metric-val" id="m-honey">—</div><div class="metric-lbl">Honeypots Detected</div></div>
+      <div class="metric-card"><div class="metric-val" id="m-top">—</div><div class="metric-lbl">Top Score</div></div>
+    </div>
+
+    <!-- Status -->
+    <div class="status" id="status" style="display:none"></div>
+
+    <!-- Spinner -->
+    <div class="spinner-wrap" id="spinner">
+      <div class="spinner"></div>
+      <span style="color:var(--subtle)">Ranking candidates via Python backend…</span>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="toolbar" id="toolbar" style="display:none">
+      <div class="toolbar-left">
+        <span style="color:var(--subtle);font-size:0.85rem">Show top:</span>
+        <select class="show-select" id="showSelect" onchange="renderCards()">
+          <option value="5">5</option>
+          <option value="10" selected>10</option>
+          <option value="20">20</option>
+          <option value="50">50</option>
+          <option value="100">All 100</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" style="width:auto;padding:0.6rem 1.4rem" onclick="downloadCSV()">
+        ⬇️ Download submission.csv
+      </button>
+    </div>
+
+    <!-- Results -->
+    <div id="results">
+      <div class="empty">
+        <div class="big">🎯</div>
+        <p>Upload a JSON file or load the sample candidates to start ranking.</p>
+        <br/>
+        <p style="color:var(--border)">← Use the sidebar to get started</p>
+      </div>
+    </div>
+
+    <footer>Redrob AI Smart Ranker · India.Runs Hackathon 2026 · Pure Python · No API calls · CPU-only · &lt;5 min for 100K candidates</footer>
+  </main>
+</div>
+
+<script>
+// ─── State ───────────────────────────────────────────────────────────────────
+let candidates = [];
+let rankedResults = [];
+
+// ─── Upload / Load ────────────────────────────────────────────────────────────
+document.getElementById('fileInput').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      const parsed = JSON.parse(ev.target.result);
+      candidates = Array.isArray(parsed) ? parsed.slice(0, 100) : [parsed];
+      document.getElementById('uploadLabel').textContent = `✅ ${file.name} (${candidates.length} candidates)`;
+      document.getElementById('rankBtn').disabled = false;
+      setStatus(`Loaded ${candidates.length} candidates from file. Click "Run Ranking" to score.`, '');
+    } catch { setStatus('Failed to parse JSON file.', 'error'); }
+  };
+  reader.readAsText(file);
+});
+
+// Drag & drop
+const zone = document.getElementById('uploadZone');
+zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag'); });
+zone.addEventListener('dragleave', () => zone.classList.remove('drag'));
+zone.addEventListener('drop', e => {
+  e.preventDefault(); zone.classList.remove('drag');
+  document.getElementById('fileInput').files = e.dataTransfer.files;
+  document.getElementById('fileInput').dispatchEvent(new Event('change'));
+});
+
+async function loadSample() {
+  setStatus('Loading sample_candidates.json…', '');
+  try {
+    const resp = await fetch('/sample_candidates.json');
+    if (!resp.ok) throw new Error('File not found');
+    candidates = await resp.json();
+    candidates = candidates.slice(0, 100);
+    document.getElementById('uploadLabel').textContent = `✅ sample_candidates.json (${candidates.length} candidates)`;
+    document.getElementById('rankBtn').disabled = false;
+    setStatus(`Loaded ${candidates.length} sample candidates. Click "Run Ranking" to score.`, 'success');
+  } catch(e) {
+    setStatus('Could not load sample file. Please upload your JSON file manually.', 'error');
+  }
+}
+
+// ─── Weight normalisation ─────────────────────────────────────────────────────
+function getWeights() {
+  const raw = {
+    ai_skills:      +document.getElementById('w_skills').value,
+    career_quality: +document.getElementById('w_career').value,
+    experience_fit: +document.getElementById('w_exp').value,
+    availability:   +document.getElementById('w_avail').value,
+    platform:       +document.getElementById('w_plat').value,
+  };
+  const total = Object.values(raw).reduce((a,b)=>a+b, 0) || 100;
+  const norm  = {};
+  for (const [k,v] of Object.entries(raw)) norm[k] = v/total;
+  return norm;
+}
+
+function updateWeights() {
+  const norm = getWeights();
+  document.getElementById('pct_skills').textContent = `${Math.round(norm.ai_skills*100)}%`;
+  document.getElementById('pct_career').textContent = `${Math.round(norm.career_quality*100)}%`;
+  document.getElementById('pct_exp').textContent    = `${Math.round(norm.experience_fit*100)}%`;
+  document.getElementById('pct_avail').textContent  = `${Math.round(norm.availability*100)}%`;
+  document.getElementById('pct_plat').textContent   = `${Math.round(norm.platform*100)}%`;
+}
+updateWeights();
+
+// ─── Ranking ──────────────────────────────────────────────────────────────────
+async function runRanking() {
+  if (!candidates.length) return;
+  setSpinner(true);
+  document.getElementById('toolbar').style.display = 'none';
+  document.getElementById('results').innerHTML = '';
+
+  try {
+    const resp = await fetch('/api/rank', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ candidates }),
+    });
+    if (!resp.ok) throw new Error(`Server error ${resp.status}`);
+    const data = await resp.json();
+    rankedResults = data.ranked || [];
+
+    // Update metrics
+    document.getElementById('m-total').textContent  = rankedResults.length;
+    document.getElementById('m-fit').textContent    = rankedResults.filter(r=>r.score>=0.70).length;
+    document.getElementById('m-honey').textContent  = data.honeypots || 0;
+    document.getElementById('m-top').textContent    = (data.top_score||0).toFixed(3);
+
+    setStatus(`✅ Ranked ${rankedResults.length} candidates successfully. Honeypots detected: ${data.honeypots||0} (excluded).`, 'success');
+    document.getElementById('toolbar').style.display = 'flex';
+    renderCards();
+  } catch(e) {
+    setStatus(`Error: ${e.message}`, 'error');
+  } finally {
+    setSpinner(false);
+  }
+}
+
+// ─── Render cards ────────────────────────────────────────────────────────────
+function renderCards() {
+  const n    = +document.getElementById('showSelect').value;
+  const show = rankedResults.slice(0, n);
+  const el   = document.getElementById('results');
+  el.innerHTML = show.map(r => cardHTML(r)).join('');
+}
+
+function cardHTML(r) {
+  const rank   = r.rank;
+  const score  = r.score;
+  const p      = r.profile || {};
+  const s      = r.redrob_signals || {};
+  const comps  = r.components || {};
+  const skills = r.skills || [];
+  const career = r.career_history || [];
+
+  const rc = rank===1?'r1':rank===2?'r2':rank===3?'r3':rank<=10?'r10':'rn';
+  const sc = score>=0.7?'score-high':score>=0.45?'score-mid':score>=0.25?'score-low':'score-dead';
+
+  const title   = p.current_title || '—';
+  const company = p.current_company || '—';
+  const loc     = p.location || '—';
+  const yoe     = parseFloat(p.years_of_experience||0).toFixed(1);
+  const notice  = s.notice_period_days ?? '?';
+  const rr      = ((s.recruiter_response_rate||0)*100).toFixed(0);
+  const gh      = s.github_activity_score ?? -1;
+  const otw     = s.open_to_work_flag;
+  const lastAct = daysSince(s.last_active_date);
+
+  // matched AI skills
+  const AI_KEYS = ['sentence-transformers','faiss','pinecone','weaviate','qdrant','milvus','elasticsearch','opensearch','chromadb','vector search','hybrid search','semantic search','embedding','embeddings','bm25','ranking','re-ranking','information retrieval','recommendation','ndcg','mrr','nlp','llm','rag','lora','qlora','transformers','huggingface','bert','pytorch','machine learning','deep learning','python'];
+  const matched = skills.filter(sk => AI_KEYS.some(k=>(sk.name||'').toLowerCase().includes(k))).slice(0,4);
+  const skillPills = matched.map(sk=>
+    `<span class="pill pill-p">${sk.name} · ${(sk.proficiency||'?').slice(0,3)}</span>`
+  ).join('') || '<span style="color:var(--muted);font-size:0.78rem">No core AI skills matched</span>';
+
+  // notice pill color
+  const noticeColor = Number(notice)<=30?'g':Number(notice)<=60?'a':'r';
+
+  // career
+  const careerHTML = career.slice(0,3).map(j=>
+    `<div class="career-item">
+      <div class="career-dot ${j.is_current?'current':'past'}"></div>
+      <div class="career-text"><strong>${j.title||'?'}</strong> <span class="co">@ ${j.company||'?'} (${j.duration_months||'?'}mo)</span></div>
+    </div>`
+  ).join('');
+
+  // score bars
+  const barDims = [
+    {k:'ai_skills',    l:`AI Skills`},
+    {k:'career_quality',l:`Career Quality`},
+    {k:'experience_fit',l:`Exp Fit`},
+    {k:'availability', l:`Availability`},
+    {k:'platform',     l:`Platform`},
+  ];
+  const barsHTML = barDims.map(d=>{
+    const v = Math.round(comps[d.k]||0);
+    const c = v>=70?'#10b981':v>=40?'#f59e0b':'#ef4444';
+    return `<div class="bar-row">
+      <div class="bar-lbl">${d.l}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${v}%;background:${c}"></div></div>
+      <div class="bar-val">${v}</div>
+    </div>`;
+  }).join('');
+
+  // radar SVG
+  const radarSVG = makeRadar(comps);
+
+  return `<div class="card" id="card-${rank}">
+    <div class="card-header" onclick="toggleCard(${rank})">
+      <div class="rank-badge ${rc}">${rank}</div>
+      <div class="card-title">
+        <div class="ct">${r.candidate_id} · ${title}</div>
+        <div class="cs">${yoe} yrs · ${loc} · ${company}</div>
+      </div>
+      <div class="card-score ${sc}">${score.toFixed(4)}</div>
+      <div class="chevron" id="chev-${rank}">▼</div>
+    </div>
+    <div class="card-body ${rank<=3?'open':''}" id="body-${rank}">
+      <div>
+        <!-- pills -->
+        <div class="pills">
+          <span class="pill pill-${otw?'g':'r'}">${otw?'✅ Open to work':'🔴 Not open'}</span>
+          <span class="pill pill-${noticeColor}">📅 ${notice}d notice</span>
+          <span class="pill pill-b">💬 ${rr}% response</span>
+          ${gh>=0?`<span class="pill pill-${gh>=50?'g':gh>=20?'a':'r'}">⭐ GitHub ${gh}</span>`:'<span class="pill pill-r">⚠ No GitHub</span>'}
+          <span class="pill pill-p">🕒 ${lastAct}</span>
+        </div>
+        <!-- skills -->
+        <div class="section-label">🔑 Matched AI Skills</div>
+        <div class="pills" style="margin-bottom:0.75rem">${skillPills}</div>
+        <!-- reasoning -->
+        <div class="section-label">💬 Reasoning</div>
+        <div class="reasoning">${r.reasoning}</div>
+        <!-- bars -->
+        <div class="section-label">📊 Component Scores</div>
+        ${barsHTML}
+      </div>
+      <div class="radar-wrap">
+        ${radarSVG}
+        <div>
+          <div class="section-label" style="margin-bottom:0.6rem">🏢 Career History</div>
+          ${careerHTML || '<div style="color:var(--muted);font-size:0.78rem">No career data</div>'}
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function toggleCard(rank) {
+  const body = document.getElementById(`body-${rank}`);
+  const chev = document.getElementById(`chev-${rank}`);
+  body.classList.toggle('open');
+  chev.classList.toggle('open');
+}
+
+// ─── Radar chart via SVG ─────────────────────────────────────────────────────
+function makeRadar(comps) {
+  const dims  = ['ai_skills','career_quality','experience_fit','availability','platform'];
+  const labels = ['AI Skills','Career','Exp Fit','Avail','Platform'];
+  const vals   = dims.map(d=>(comps[d]||0)/100);
+  const N      = 5;
+  const cx=120, cy=110, R=80;
+  const angles = dims.map((_,i) => (i/N)*2*Math.PI - Math.PI/2);
+
+  // grid circles
+  let grid = '';
+  [0.25,0.5,0.75,1].forEach(r => {
+    const pts = angles.map(a=>`${cx+R*r*Math.cos(a)},${cy+R*r*Math.sin(a)}`).join(' ');
+    grid += `<polygon points="${pts}" fill="none" stroke="#1e2a3a" stroke-width="1"/>`;
+  });
+
+  // axes
+  let axes = angles.map(a=>`<line x1="${cx}" y1="${cy}" x2="${cx+R*Math.cos(a)}" y2="${cy+R*Math.sin(a)}" stroke="#1e2a3a" stroke-width="1"/>`).join('');
+
+  // data polygon
+  const dataPts = vals.map((v,i)=>`${cx+R*v*Math.cos(angles[i])},${cy+R*v*Math.sin(angles[i])}`).join(' ');
+
+  // labels
+  let lbls = labels.map((l,i) => {
+    const lx = cx + (R+18)*Math.cos(angles[i]);
+    const ly = cy + (R+18)*Math.sin(angles[i]);
+    return `<text x="${lx}" y="${ly}" text-anchor="middle" dominant-baseline="middle" fill="#64748b" font-size="9" font-family="Inter,sans-serif">${l}</text>`;
+  }).join('');
+
+  return `<svg viewBox="0 0 240 220" class="radar-svg">
+    ${grid}${axes}
+    <polygon points="${dataPts}" fill="rgba(139,92,246,0.15)" stroke="#8b5cf6" stroke-width="2"/>
+    ${vals.map((v,i)=>`<circle cx="${cx+R*v*Math.cos(angles[i])}" cy="${cy+R*v*Math.sin(angles[i])}" r="3" fill="#8b5cf6"/>`).join('')}
+    ${lbls}
+  </svg>`;
+}
+
+// ─── Download CSV ────────────────────────────────────────────────────────────
+function downloadCSV() {
+  const header = 'candidate_id,rank,score,reasoning\n';
+  const rows   = rankedResults.slice(0,100).map(r =>
+    `${r.candidate_id},${r.rank},${r.score.toFixed(4)},"${(r.reasoning||'').replace(/"/g,'""')}"`
+  ).join('\n');
+  const blob = new Blob([header+rows], {type:'text/csv'});
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a'); a.href=url; a.download='submission.csv'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function daysSince(dateStr) {
+  if (!dateStr) return '?';
+  try {
+    const diff = Math.floor((new Date('2026-06-16') - new Date(dateStr)) / 86400000);
+    if (diff < 0) return 'future?';
+    if (diff === 0) return 'today';
+    if (diff === 1) return 'yesterday';
+    return `${diff}d ago`;
+  } catch { return '?'; }
+}
+
+function setStatus(msg, type) {
+  const el = document.getElementById('status');
+  el.style.display = 'flex';
+  el.className = `status ${type}`;
+  el.textContent = msg;
+}
+
+function setSpinner(show) {
+  document.getElementById('spinner').className = 'spinner-wrap' + (show?' show':'');
+}
+</script>
+</body>
+</html>
