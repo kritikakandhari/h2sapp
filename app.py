@@ -7,7 +7,7 @@ a Python WSGI entrypoint with no vercel.json needed.
 
 Routes:
   GET  /                      -> the dashboard UI
-  GET  /sample_candidates.json -> bundled 50-candidate sample
+  GET  /sample_candidates.json -> bundled 100-candidate sample
   POST /api/rank               -> { "candidates": [...] } -> ranked JSON
 """
 
