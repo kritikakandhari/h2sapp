@@ -207,9 +207,13 @@ AI_TITLES = {
     "data scientist", "research scientist", "applied scientist",
     "nlp engineer", "deep learning engineer", "research engineer",
     "applied ml", "applied ai", "ai researcher",
-    "computer vision engineer", "search engineer", "mlops engineer",
+    "search engineer", "mlops engineer",
     "recommendation systems engineer", "ai specialist",
     "ai research engineer", "data engineer",
+    # NOTE: deliberately excludes "computer vision engineer" -- the JD
+    # explicitly disqualifies CV/speech/robotics specialists without
+    # significant NLP/IR exposure. A genuine CV->NLP crossover candidate
+    # still earns AI-years credit via career description content, not title.
 }
 
 # Clearly non-AI titles (all-non-AI-title career triggers penalty)
