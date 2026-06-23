@@ -524,6 +524,30 @@ def _compute_penalty(c: Dict) -> float:
     if not s.get("open_to_work_flag", True):
         penalty *= 0.90
 
+    # ── 5. Title-chaser: hopping every ~1.5yrs, optimizing for title not depth ─
+    # JD: "switching companies every 1.5 years... we're not a fit." This is
+    # already softly reflected in career_quality's tenure_stability sub-score,
+    # but the JD's language is strong enough to warrant a direct penalty too.
+    past = [j for j in career if not j.get("is_current", False)]
+    if len(past) >= 2:
+        avg_tenure = sum(max(0, j.get("duration_months", 12) or 12) for j in past) / len(past)
+        if avg_tenure < 18:
+            penalty *= 0.65
+
+    # ── 6. Closed-source veteran: 5+yrs, zero external validation ─────────
+    # JD: "entirely on closed-source proprietary systems for 5+ years without
+    # external validation (papers, talks, open-source). We need to see how
+    # you think, not just trust that you can think."
+    profile = c.get("profile", {}) or {}
+    yoe = float(profile.get("years_of_experience", 0) or 0)
+    gh  = s.get("github_activity_score", -1)
+    if yoe >= 5 and gh == -1:
+        desc = " ".join((j.get("description") or "") for j in career).lower()
+        oss_signal = any(kw in desc for kw in
+                          ("open source", "github", "arxiv", "published", "conference"))
+        if not oss_signal:
+            penalty *= 0.80
+
     return penalty
 
 
@@ -533,6 +557,33 @@ def _compute_penalty(c: Dict) -> float:
 #  no hallucination, meaningful variation across candidates, rank-consistent
 #  tone. Every field in the output string comes from the actual candidate data.
 # ═══════════════════════════════════════════════════════════════════════════
+
+# Domain phrase groups — map top matched skill to a JD-relevant narrative phrase
+_DOMAIN_GROUPS = [
+    (("sentence-transformers","sentence transformer","faiss","pinecone","weaviate","qdrant",
+      "milvus","elasticsearch","opensearch","chromadb","vector search","vector database",
+      "vector db","hybrid search","dense retrieval","semantic search","embeddings","embedding",
+      "bm25","approximate nearest","nearest neighbor"), "retrieval and vector-search systems"),
+    (("re-ranking","reranking","learning to rank","information retrieval","recommendation system",
+      "recommender system","recommender","search system","search relevance","retrieval system",
+      "ranking system","ndcg","mrr metric","mean reciprocal","mean average precision"),
+     "ranking and recommendation systems"),
+    (("large language model","llm","retrieval augmented","rag pipeline","fine-tuning",
+      "fine tuning","finetuning","lora","qlora","peft","huggingface","hugging face","langchain",
+      "llama"), "LLM and RAG systems"),
+    (("natural language processing","nlp","bert","transformers","question answering",
+      "named entity recognition","text classification"), "NLP systems"),
+    (("pytorch","tensorflow","machine learning","deep learning","neural network","xgboost",
+      "lightgbm"), "applied ML systems"),
+]
+
+
+def _domain_phrase(matched_lower_names):
+    for keys, phrase in _DOMAIN_GROUPS:
+        if any(any(k in n for k in keys) for n in matched_lower_names):
+            return phrase
+    return None
+
 
 def _build_reasoning(c: Dict, scores: Dict, final: float, penalty: float) -> str:
     p  = c.get("profile", {}) or {}
@@ -544,7 +595,7 @@ def _build_reasoning(c: Dict, scores: Dict, final: float, penalty: float) -> str
     yoe   = float(p.get("years_of_experience", 0) or 0)
     loc   = p.get("location", "Unknown location")
 
-    # Top 3 AI-matched skills with proficiency and usage
+    # Top 3 AI-matched skills with proficiency and usage (kept for the skills clause)
     matched = []
     for skill in sk:
         n = (skill.get("name") or "").lower()
@@ -552,32 +603,78 @@ def _build_reasoning(c: Dict, scores: Dict, final: float, penalty: float) -> str
             if key in n or n in key:
                 prof = skill.get("proficiency", "?")[:3]
                 dur  = skill.get("duration_months", 0) or 0
-                matched.append((cfg.CORE_SKILLS[key], f"{skill['name']}({prof},{dur}mo)"))
+                matched.append((cfg.CORE_SKILLS[key], skill["name"], f"{skill['name']} ({prof}, {dur}mo)"))
                 break
     matched.sort(reverse=True)
-    top_skills = ", ".join(m[1] for m in matched[:3]) or "no core AI skills matched"
+    top_names_lower = [m[1].lower() for m in matched[:3]]
+    skills_clause = ", ".join(m[2] for m in matched[:3])
+    domain = _domain_phrase(top_names_lower)
 
-    # Availability string
+    # Company-type signal (product vs. consulting-heavy)
+    companies = [(j.get("company") or "").lower() for j in ca]
+    consulting_hits = sum(1 for co in companies if any(f in co for f in cfg.CONSULTING_FIRMS))
+    consulting_only = bool(companies) and consulting_hits == len(companies)
+    product_leaning = bool(companies) and consulting_hits == 0
+
+    # Availability facts
     la = s.get("last_active_date", "")
     try:
         days_ago   = (_TODAY - datetime.strptime(la, "%Y-%m-%d").date()).days
         active_str = f"active {days_ago}d ago"
     except Exception:
         active_str = "activity unknown"
-
     notice = s.get("notice_period_days", "?")
     rr     = float(s.get("recruiter_response_rate", 0) or 0)
     gh     = s.get("github_activity_score", -1)
-    gh_str = f"GitHub:{gh:.0f}" if gh != -1 else "no GitHub"
     otw    = s.get("open_to_work_flag", False)
-    otw_s  = "open to work" if otw else "NOT open to work"
 
-    # Honest concerns — every concern is evidence-based, not speculative
+    # ── Opening clause: title + years framed against the JD's 5-9yr / 6-8yr band ──
+    if cfg.EXP_SWEET_MIN <= yoe <= cfg.EXP_SWEET_MAX:
+        yoe_frame = f"{yoe:.1f} years — squarely in the JD's {cfg.EXP_SWEET_MIN:.0f}-{cfg.EXP_SWEET_MAX:.0f}yr target band"
+    elif cfg.EXP_IDEAL_MIN <= yoe <= cfg.EXP_IDEAL_MAX:
+        yoe_frame = f"{yoe:.1f} years, within the JD's {cfg.EXP_IDEAL_MIN:.0f}-{cfg.EXP_IDEAL_MAX:.0f}yr range"
+    elif yoe > cfg.EXP_IDEAL_MAX:
+        yoe_frame = f"{yoe:.1f} years — above the JD's {cfg.EXP_IDEAL_MAX:.0f}yr target, possibly over-senior for a founding-team role"
+    else:
+        yoe_frame = f"{yoe:.1f} years — below the JD's {cfg.EXP_IDEAL_MIN:.0f}yr target"
+
+    if domain:
+        opener = f"{title} with {yoe_frame}, building {domain}"
+    else:
+        opener = f"{title} with {yoe_frame}"
+
+    if consulting_only:
+        opener += " — entirely consulting-firm tenure, which the JD explicitly flags against"
+    elif product_leaning and domain:
+        opener += " at product companies, matching the JD's preference over pure-services background"
+
+    # ── Skills clause (folded into sentence 1) ──
+    if skills_clause:
+        skills_part = f"; core AI skills: {skills_clause}"
+    else:
+        skills_part = "; no core AI skills from the JD's must-have list were matched"
+
+    sentence1 = f"{opener}{skills_part}."
+
+    # ── Location/availability clause ──
+    loc_note = ""
+    if any(pl in loc.lower() for pl in cfg.PREFERRED_LOCATIONS):
+        loc_note = f"{loc}-based, matching the JD's Pune/Noida preference"
+    elif s.get("willing_to_relocate"):
+        loc_note = f"{loc}-based but willing to relocate"
+    else:
+        loc_note = f"{loc}-based"
+
+    avail_bits = [loc_note, active_str, f"{rr:.0%} recruiter response"]
+    if gh >= 0:
+        avail_bits.append(f"GitHub activity {gh:.0f}")
+
+    # ── Honest concerns — evidence-based, folded into sentence 2 ──
     concerns = []
     if notice and str(notice).isdigit() and int(notice) > 60:
-        concerns.append(f"long notice period ({notice}d)")
+        concerns.append(f"long {notice}-day notice period")
     if rr < 0.25:
-        concerns.append(f"low recruiter response rate ({rr:.0%})")
+        concerns.append(f"low recruiter response ({rr:.0%})")
     if gh == -1:
         concerns.append("no GitHub linked")
     if not otw:
@@ -588,22 +685,20 @@ def _build_reasoning(c: Dict, scores: Dict, final: float, penalty: float) -> str
         concerns.append("career lacks AI production evidence")
     if penalty < 0.5:
         concerns.append("career predominantly consulting/non-AI")
+    past_jobs = [j for j in ca if not j.get("is_current", False)]
+    if len(past_jobs) >= 2:
+        avg_t = sum(max(0, j.get("duration_months", 12) or 12) for j in past_jobs) / len(past_jobs)
+        if avg_t < 18:
+            concerns.append(f"frequent job changes (avg {avg_t:.0f}mo/role) — title-chasing pattern the JD flags")
+    if yoe >= 5 and gh == -1:
+        desc_all = " ".join((j.get("description") or "") for j in ca).lower()
+        if not any(kw in desc_all for kw in ("open source", "github", "arxiv", "published", "conference")):
+            concerns.append("5+ yrs with no external validation (no GitHub, papers, or OSS)")
 
-    concern_str = ("; concerns: " + ", ".join(concerns)) if concerns else ""
+    sentence2_bits = "; ".join(avail_bits)
+    if concerns:
+        sentence2 = f"{sentence2_bits}; concerns: {', '.join(concerns)}."
+    else:
+        sentence2 = f"{sentence2_bits}; no major concerns."
 
-    # Tone bands — calibrated to actual top-100 score range (~0.75–0.93)
-    # so a random 10-row sample shows genuine tonal variation
-    if   final >= 0.84: lead = "Exceptional fit"
-    elif final >= 0.80: lead = "Strong fit"
-    elif final >= 0.77: lead = "Good fit"
-    elif final >= 0.70: lead = "Solid fit"
-    elif final >= 0.50: lead = "Moderate fit"
-    elif final >= 0.30: lead = "Adjacent profile"
-    else:               lead = "Weak match"
-
-    return (
-        f"{lead}: {title}, {yoe:.1f} yrs, {loc}. "
-        f"AI skills: {top_skills}. "
-        f"{active_str}, notice {notice}d, response {rr:.0%}, {gh_str}, {otw_s}"
-        f"{concern_str}."
-    )
+    return f"{sentence1} {sentence2}"
